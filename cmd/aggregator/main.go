@@ -36,6 +36,7 @@ var state struct {
 }
 
 // update sensor information every 30 seconds (plus request time)
+// if sensor is unavailable, it uses the last available data
 func (s *sensor) observe() {
 	for {
 		s.status = status_waiting
