@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,13 @@ var sensors = []sensor{
 	local(8081), local(8082), local(8083), local(8083),
 }
 
+// cached response data
+var state struct {
+	sync.RWMutex
+	Value      int  `json:"value"`       // average sensor value
+	IsOutdated bool `json:"is_outdated"` // some sensor data was not available
+}
+
 // update sensor information every 30 seconds (plus request time)
 func (s *sensor) observe() {
 	for {
@@ -35,14 +43,17 @@ func (s *sensor) observe() {
 		if err != nil {
 			log.Printf("error reaching host '%s': %s", s.host, err)
 			s.status = status_unavailable
+			updateState()
 		} else {
 			var data int
 			_, err = fmt.Fscan(res.Body, &data)
 			if err != nil {
 				s.status = status_unavailable
+				updateState()
 			} else {
 				s.value = data
 				s.status = status_ok
+				updateState()
 			}
 		}
 		time.Sleep(30 * time.Second)
@@ -54,20 +65,27 @@ func local(port int) sensor {
 	return sensor{host: fmt.Sprintf("http://localhost:%d", port)}
 }
 
-// convert this to return json
-func handleHttp(w http.ResponseWriter, r *http.Request) {
-	var resp struct {
-		Value      int  `json:"value"`       // average sensor value
-		IsOutdated bool `json:"is_outdated"` // some sensor data was not available
-	}
+// update the cached state of sensors
+func updateState() {
+	state.Lock()
+	defer state.Unlock()
+
+	state.Value = 0
+	state.IsOutdated = false
 
 	for _, s := range sensors {
-		resp.Value += s.value
-		resp.IsOutdated = resp.IsOutdated || s.status != status_ok
+		state.Value += s.value
+		state.IsOutdated = state.IsOutdated || s.status != status_ok
 	}
-	resp.Value /= len(sensors)
+	state.Value /= len(sensors)
+}
 
-	err := json.NewEncoder(w).Encode(resp)
+// pull cached state of sensors and encode it
+func handleHttp(w http.ResponseWriter, r *http.Request) {
+	state.RLock()
+	defer state.RUnlock()
+
+	err := json.NewEncoder(w).Encode(&state)
 	if err != nil {
 		log.Panicf("error encoding response: %s", err)
 	}
