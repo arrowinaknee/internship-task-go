@@ -15,18 +15,18 @@ func init() {
 var val uint8
 
 func main() {
-	rand.Seed(time.Now().Unix())
+	rand.Seed(time.Now().UnixNano())
 
 	go func() {
-		for  {
+		for {
 			val = uint8(rand.Intn(255))
-			time.Sleep(time.Second*30)
+			time.Sleep(time.Second * 30)
 		}
 	}()
 
 	err := http.ListenAndServe(":8080", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if rand.Intn(20) == 0 {
-			time.Sleep(time.Second*time.Duration(rand.Intn(10)))
+			time.Sleep(time.Second * time.Duration(rand.Intn(10)))
 		}
 
 		_, err := fmt.Fprintf(writer, "%d", val)
