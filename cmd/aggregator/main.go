@@ -4,53 +4,70 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 )
 
-// should pass them procedurally
-var sensors = []string{
-	"http://localhost:8081",
-	"http://localhost:8082",
-	"http://localhost:8083",
-	"http://localhost:8084",
+type status int
+
+const (
+	status_ok          = status(0)
+	status_waiting     = status(1)
+	status_unavailable = status(2)
+)
+
+type sensor struct {
+	host   string
+	value  int
+	status status
 }
 
-var sensor_vals []int    // should also srore status (pending, unavailable, etc.)
-var data_lock sync.Mutex // is it needed here?
+// should pass them procedurally
+var sensors = []sensor{
+	local(8081), local(8082), local(8083), local(8083),
+}
 
-func observe(host string, id int) {
+// update sensor information every 30 seconds (plus request time)
+func (s *sensor) observe() {
 	for {
-		res, err := http.Get("http://localhost:8081")
+		s.status = status_waiting
+		res, err := http.Get(s.host)
 		if err != nil {
-			log.Printf("error reaching host #%d: %s", id, err)
+			log.Printf("error reaching host '%s': %s", s.host, err)
+			s.status = status_unavailable
 		} else {
 			var data int
-			fmt.Fscan(res.Body, &data)
-
-			data_lock.Lock()
-			sensor_vals[id] = data
-			data_lock.Unlock()
+			_, err = fmt.Fscan(res.Body, &data)
+			if err != nil {
+				s.status = status_unavailable
+			} else {
+				s.value = data
+				s.status = status_ok
+			}
 		}
 		time.Sleep(30 * time.Second)
 	}
 }
 
+// make sensor struct from port number on localhost
+func local(port int) sensor {
+	return sensor{host: fmt.Sprintf("http://localhost:%d", port)}
+}
+
 // convert this to return json
 func handleHttp(w http.ResponseWriter, r *http.Request) {
 	var sum = 0
-	for _, v := range sensor_vals {
-		sum += v
+	var isOutdated = false // some sensor data was not available
+	for _, s := range sensors {
+		sum += s.value
+		isOutdated = isOutdated || s.status != status_ok
 	}
 	res := sum / len(sensors)
 	fmt.Fprint(w, res)
 }
 
 func main() {
-	sensor_vals = make([]int, len(sensors))
-
-	for i, h := range sensors {
-		go observe(h, i)
+	for i := range sensors {
+		go sensors[i].observe()
 	}
 
 	log.Fatal(http.ListenAndServe(":8080", http.HandlerFunc(handleHttp)))
