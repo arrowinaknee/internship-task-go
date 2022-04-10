@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -55,14 +56,21 @@ func local(port int) sensor {
 
 // convert this to return json
 func handleHttp(w http.ResponseWriter, r *http.Request) {
-	var sum = 0
-	var isOutdated = false // some sensor data was not available
-	for _, s := range sensors {
-		sum += s.value
-		isOutdated = isOutdated || s.status != status_ok
+	var resp struct {
+		Value      int  `json:"value"`       // average sensor value
+		IsOutdated bool `json:"is_outdated"` // some sensor data was not available
 	}
-	res := sum / len(sensors)
-	fmt.Fprint(w, res)
+
+	for _, s := range sensors {
+		resp.Value += s.value
+		resp.IsOutdated = resp.IsOutdated || s.status != status_ok
+	}
+	resp.Value /= len(sensors)
+
+	err := json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		log.Panicf("error encoding response: %s", err)
+	}
 }
 
 func main() {
